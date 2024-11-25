@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1280</width>
+    <height>720</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Polar Bear Visual Page</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <widget class="QLabel" name="video">
+    <property name="geometry">
+     <rect>
+      <x>4</x>
+      <y>1</y>
+      <width>1280</width>
+      <height>720</height>
+     </rect>
+    </property>
+    <property name="minimumSize">
+     <size>
+      <width>1280</width>
+      <height>720</height>
+     </size>
+    </property>
+    <property name="text">
+     <string>Camera Area</string>
+    </property>
+    <property name="alignment">
+     <set>Qt::AlignCenter</set>
+    </property>
+   </widget>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

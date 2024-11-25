@@ -1,0 +1,12 @@
+[2024-09-25 16:11:21.717][DBG] CComBase::Load, Load szDllPath[/home/yeung/code/mmaction2-main/lib/linux/HCNetSDKCom/libHCPreview.so] SUCC
+[2024-09-25 16:11:21.717][INF] AbilityAnalyze---Init-- start
+[2024-09-25 16:11:21.719][DBG] AbilityAnalyze---Init-- over, DeviceList path [/home/yeung/code/mmaction2-main/lib/linux/HCNetSDKCom/LocalXml/DeviceList.xml], load result[0]
+[2024-09-25 16:11:21.719][INF] The COM:Preview ver is 6.1.9.48, 2023_04_10.
+[2024-09-25 16:11:21.719][INF] Private connect 219.216.72.149:8000 sock=206 this=0x149f0e04 cmd=0x30203 port=43948
+[2024-09-25 16:11:22.301][INF] Private connect 219.216.72.149:8000 sock=206 this=0x149f0e04 cmd=0x30203 port=43954
+[2024-09-25 16:11:22.364][INF] Private connect 219.216.72.149:8000 sock=206 this=0x149f0e04 cmd=0x30203 port=43970
+[2024-09-25 16:11:22.958][INF] Private connect 219.216.72.149:8000 sock=206 this=0x149f0e04 cmd=0x30203 port=43978
+[2024-09-25 16:11:23.019][INF] Private connect 219.216.72.149:8000 sock=206 this=0x149f0e04 cmd=0x30203 port=43982
+[2024-09-25 16:11:23.492][INF] Private connect 219.216.72.149:8000 sock=206 this=0x149f0e04 cmd=0x30203 port=43996
+[2024-09-25 16:11:23.547][INF] Private connect 219.216.72.149:8000 sock=206 this=0x149f0e04 cmd=0x30203 port=44006
+[2024-09-25 16:11:23.887][INF] Private connect 219.216.72.149:8000 sock=206 this=0x149f0e04 cmd=0x30203 port=44008

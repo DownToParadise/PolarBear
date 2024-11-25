@@ -1,0 +1,16 @@
+[2024-09-26 09:06:28.017][DBG] CCoreGlobalCtrlBase::LoadDSo, HPR_LoadDSo Succ, Path[/usr/lib/x86_64-linux-gnu/libz.so.1.2.11], hHandleRet[26770384]
+[2024-09-26 09:06:28.017][INF] The COM:HCCoreBase ver is 6.1.4.15, 2020_03_05. Async:1.
+[2024-09-26 09:06:28.017][INF] The COM:Core ver is 6.1.9.48, 2023_04_10. Async:1.
+[2024-09-26 09:06:28.017][INF] This HCNetSDK ver is 6.1.9.48 Ver 2023_04_10.
+[2024-09-26 09:06:28.017][INF] Login dev 219.216.72.149:8000.
+[2024-09-26 09:06:28.017][INF] dwTotalNum[2048]
+[2024-09-26 09:06:28.018][INF] Private connect 219.216.72.149:8000 sock=171 this=0x15604c34 cmd=0x10000 port=51474
+[2024-09-26 09:06:28.018][INF] LogonDev1 in[219.216.72.149:8000]
+[2024-09-26 09:06:28.020][DBG] CCoreGlobalCtrlBase::LoadDSo, HPR_LoadDSo Succ, Path[/home/yeung/code/mmaction2-main/lib/linux/libcrypto.so.1.1], hHandleRet[354270032]
+[2024-09-26 09:06:28.021][DBG] CCoreGlobalCtrlBase::LoadDSo, HPR_LoadDSo Succ, Path[/home/yeung/code/mmaction2-main/lib/linux/libssl.so.1.1], hHandleRet[358294784]
+[2024-09-26 09:06:28.021][INF] SSLTRANSAPI::LoadAPI, libeay, Load Real Path[/home/yeung/code/mmaction2-main/lib/linux/libcrypto.so.1.1]
+[2024-09-26 09:06:28.021][INF] SSLTRANSAPI::IsAllAPILoaded, SSL_library_init Unload
+[2024-09-26 09:06:28.021][INF] OpenSSL, Not All Function Loaded!
+[2024-09-26 09:06:28.021][INF] SSLTRANSAPI::PrintVersion, OpenSSL version info [OpenSSL 1.1.1l  24 Aug 2021]
+[2024-09-26 09:06:28.021][INF] CSSLTrans::SSLCtxInit, dwSSLVersion[6], m_fnTLSServerMethod
+[2024-09-26 09:06:28.024][ERR] CSSLTrans::SSLTrans_CTX_Load_CA, invalid path[/home/yeung/code/mmaction2-main/lib/linux/cert/\]
