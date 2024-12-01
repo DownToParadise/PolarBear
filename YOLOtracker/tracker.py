@@ -47,7 +47,7 @@ class Tracker():
         self.iou_thresh = 0.3
 
 
-        self.detector_model_path= './weights/yolov8n.pt'
+        self.detector_model_path= './weights/yolov8s.pt'
         #ocsort没用过这两个 不过别的会用到
         self.reid_model_path = './weights/ckpt.t700'
         self.dhn_path = './weights/DHN.pth'
@@ -135,12 +135,7 @@ class Tracker():
                 bbox[2]=int(bbox[0] + bbox[2])
                 bbox[3]=int(bbox[1] + bbox[3])
                 results[id] = bbox
-                # Draw the bounding box
-                cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])),
-                              (int(bbox[2]), int(bbox[3])),
-                              (255, 0, 0), 2)
-                cv2.putText(frame, f'ID: {id}', (int(bbox[0]), int(bbox[1] - 10)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
                 
 
         # print("detect_num\t", detect_num)

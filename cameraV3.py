@@ -30,6 +30,12 @@ class videoProcessingThread(QThread):
     update_detection = pyqtSignal(object)
     camera_log = pyqtSignal(str)
     update_detectedIDs = pyqtSignal(object)
+    update_frame = pyqtSignal(object)
+    # 此信号专门用来发送图像匹配未识别、目标丢失、目前无检测人物
+    # 如果图像匹配未识别到目标人物，就跳到随机匹配功能
+    # 随机匹配如果未识别到人物，就切换到下一个人物，目前切换到下一个人物
+    # 0为未检测到人型号，1为目标丢失信号，2为图像匹配失败信号，3用于重置目标丢失信号
+    target_signal = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
@@ -66,7 +72,7 @@ class videoProcessingThread(QThread):
         self.ctrl_count = 0
         self.fps_window_size = 10
         self.target_id = torch.tensor(0)  # 默认为1
-        self.acc_thre = 0.5
+        self.acc_thre = 0.3
 
         # 识别结果
         self.diff_x = 0
@@ -84,6 +90,8 @@ class videoProcessingThread(QThread):
         # 多少帧未检测到人脸就报错，自动切换随机模式
         self.imageMatch_tolerance_thread = 50
         self.imageMatch_success = False
+
+        self.target_lost_count = 0
         
     def CamInit(self, ip, name, passwd):
         # 初始化摄像头
@@ -155,10 +163,10 @@ class videoProcessingThread(QThread):
         return bbox
 
     def match_face(self, frame, results):
-        T_id = None
+        T_id = False
         # 加载图片
         if self.known_face_encodings is None:
-            return None
+            return T_id
         face_locations = face_recognition.face_locations(frame)
         face_encodings = face_recognition.face_encodings(frame, face_locations)
 
@@ -180,18 +188,19 @@ class videoProcessingThread(QThread):
                 cv2.circle(frame, (center_x, center_y), 2, (0, 255, 0), -1)
                 # 找到离face 最近的bbox然后进行匹配
                 for id, bbox in results.items():
-                    print("id\t", id, "bbox\t", bbox, "face\t", center_x, center_y)
+                    # print("id\t", id, "bbox\t", bbox, "face\t", center_x, center_y)
                     # print("face_recong bbox", bbox)
+                    # 匹配结果比较简单
                     if bbox[0] <= center_x <= bbox[2] and bbox[1] <= center_y <= bbox[3]:
-                        print("face_recong id \t",id)
+                        # print("face_recong id \t",id)
                         self.camera_log.emit("图像匹配成功ID"+str(id))
                         self.imageMatch_success = True
-                        T_id = id
                         self.target_id = id
+                        T_id = True 
         return  T_id
 
     def run(self):
-        count = 0
+        action_count = 0
         print_label = "recognizing..."
         print_acc = 0
         action_label = ""
@@ -206,163 +215,141 @@ class videoProcessingThread(QThread):
         fps = 0
         fps_list = []
         prev_time = time.time()
+        # count = 1
         
         if self.Cam is None:
             print("Error! Cam is not Init!")
         
         # 改正这里self.cam持续输出图片
         while True and self.running:
-            
             _, frame = self.Cam.read()
-
+            img = frame.copy()
             # 推理，检测并跟踪
             # 这里是对每一帧都进行检测，也可以对连续的图片进行检测
             # 也可以考虑用yolo的关键点提取方法，因为只识别一个人所以比较简单
-            # results_ = model.track(frame, persist=True, classes=[0], verbose=False)
             detect_num, results, ids= self.tracker.yolov8_tracker(frame)
 
             # 每次识别完后都发送id列表
             self.update_detectedIDs.emit(ids)
-
+            # self.camera_log.emit(str(detect_num))
             if detect_num == 0:
-                # 如果未识别到就发送空白帧
+                self.target_signal.emit(0)
+                # 如果未识别到就发送空白帧,并跳出循环
                 self.update_detected_frame.emit(frame)
+                self.update_frame.emit(img)
                 continue
             
-            # 找到当前列表
-            if self.imageFile != None:
-                if not self.imageMatch_success:
+            # 人脸识别确定目标
+            if self.imageMatch_success == False:
+                if self.imageFile != None:
+                    # print(self.imageFile)
                     # 匹配时不开启行为识别
-                    self.target_id = self.match_face(frame, results) 
+                    image_match_flag = self.match_face(frame, results) 
+                    # print("image match", image_match_flag)
                     # 匹配时间说明
-                    image_tolerance += 1
-                    if image_tolerance % 10 == 0:
-                        self.camera_log.emit("图像匹配中...."+str(image_tolerance//10))
-                        if image_tolerance == self.imageMatch_tolerance_thread:
-                            self.camera_log.emit("图像匹配失败")
-                            self.imageFile = None
-                            self.target_id = ids[0]
-                            self.imageMatch_success = True
-                            self.camera_log.emit("随机匹配目标ID"+str(int(self.target_id)))
-                else:
-                    # 匹配成功才开启行为识别
-                    for id, bbox in results.items():
-                        try:
-                            if id != self.target_id:
-                                continue
-                        except TypeError:
-                            break
-                        # 是否开启图像匹配
-                        # 数据处理
-                        # xyxy = self.tlwh_to_xyxy(result.tlwh)
-                        xyxy = bbox
-                        bbox_img = self.crop_image(frame, xyxy)
-                        padded_img = self.padding_bboximg(bbox_img)
-                        # 推理
-                        preds = self.action_model(padded_img, device=self.device, verbose=False)
-                        # 标签处理
-                        action_label = self.action_label_map[str(preds[0].probs.top1)]
-                        action_label_acc = preds[0].probs.top1conf.cpu().numpy()
-                        if action_label_acc <= self.acc_thre:
-                            continue
-                        action_preds = [action_label, action_label_acc]
-                        action_queue.enqueue(item=action_preds)
-                        # print(preds)
-                        # 将显示的识别数据和发送的数据分开，可在页面单独显示该画面
-                        if count == self.num_frame:
-                            print_label, print_acc = action_queue.find_most_frequent()
-                            count = 0
-                        else:
-                            count += 1
-                            
-                        # 控制摄像头
-                        if self.tracking and self.cam_ctrl_finshed:
-                            # 该版本将摄像头控制功能取消，改为偏移量计算，需要将识别结果与跟踪同步传递
-                            # print(time.time())
-                            self.ControlPTZ_V2_(print_label, xyxy)
-                        
-                    # 计算帧率
-                    # 记录当前时间
-                    curr_time = time.time()
-                    fps = 1 / (curr_time - prev_time)
-                    prev_time = curr_time
-                    # 添加到FPS列表并保持滑动窗口大小
-                    fps_list.append(fps)
-                    if len(fps_list) > self.fps_window_size:
-                        fps_list.pop(0)
-                    # 计算平均FPS
-                    avg_fps = sum(fps_list) / len(fps_list)
+                    # 这个可以放在mainplatform中
+                    if image_match_flag == False:
+                        # print("2")
+                        self.target_signal.emit(2)
+                        continue
+                    
+            # 找到对应的目标
+            i = 0
+            for id, bbox in results.items():
+                # 只有目标丢失后才会触发目标寻找
+                try:
+                    if id == self.target_id:
+                        # color = (B, G, R)
+                        color = (0, 0, 255)
+                        thickness = 2
+                        cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])),
+                            (int(bbox[2]), int(bbox[3])),
+                            color=color, thickness=thickness)
+                        cv2.putText(frame, f'ID: {id}', (int(bbox[0]), int(bbox[1] - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, color=color, thickness=thickness)
+                        # 在外置页面上进行展示
+                        color = (0, 0, 255)
+                        thickness = 2
+                        cv2.rectangle(img, (int(bbox[0]), int(bbox[1])),
+                            (int(bbox[2]), int(bbox[3])),
+                            color=color, thickness=thickness)
+                        # cv2.putText(frame, f'ID: {id}', (int(bbox[0]), int(bbox[1] - 10)),
+                        #     cv2.FONT_HERSHEY_SIMPLEX, 0.8, color=color, thickness=thickness)
+                    else:
+                        # 没找到flag +1，并跳出循环进行后续操作
+                        i += 1
+                        color = (200, 0, 0)
+                        thickness = 2
+                        cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])),
+                            (int(bbox[2]), int(bbox[3])),
+                            color=color, thickness=thickness)
+                        cv2.putText(frame, f'ID: {id}', (int(bbox[0]), int(bbox[1] - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, color=color, thickness=thickness)
+                        continue
+                except TypeError:
+                    break
+                # 是否开启图像匹配
+                # 数据处理
+                # xyxy = self.tlwh_to_xyxy(result.tlwh)
+                # 找到了目标队形
+                self.target_signal.emit(3)
+                xyxy = bbox
+                bbox_img = self.crop_image(frame, xyxy)
+                padded_img = self.padding_bboximg(bbox_img)
+                # 推理
+                preds = self.action_model(padded_img, device=self.device, verbose=False)
+                # 标签处理
+                action_label = self.action_label_map[str(preds[0].probs.top1)]
+                action_label_acc = preds[0].probs.top1conf.cpu().numpy()
+                if action_label_acc <= self.acc_thre:
+                    continue
+                action_preds = [action_label, action_label_acc]
+                action_queue.enqueue(item=action_preds)
 
-                    # 绘图
-                    # 绘制框
-                    # 因为上面都是浅拷贝，所以在tracker中的画图在此处有效
-                    # 绘制帧率
+                # 将显示的识别数据和发送的数据分开，可在页面单独显示该画面
+                if action_count == self.num_frame:
+                    print_label, print_acc = action_queue.find_most_frequent()
+                    action_count = 0
+                else:
+                    action_count += 1
+                # 控制摄像头
+                if self.tracking and self.cam_ctrl_finshed:
+                    # 该版本将摄像头控制功能取消，改为偏移量计算，需要将识别结果与跟踪同步传递
+                    # 默认开启
+                    self.ControlPTZ_V2_(print_label, xyxy)
+                
+            # 计算帧率
+            # 记录当前时间
+            curr_time = time.time()
+            fps = 1 / (curr_time - prev_time)
+            prev_time = curr_time
+            # 添加到FPS列表并保持滑动窗口大小
+            fps_list.append(fps)
+            if len(fps_list) > self.fps_window_size:
+                fps_list.pop(0)
+            # 计算平均FPS
+            avg_fps = sum(fps_list) / len(fps_list)
+
+            # 绘图
+            # 绘制框
+            # 因为上面都是浅拷贝，所以在tracker中的画图在此处有效
+            # 绘制帧率
+            if i == detect_num:
+                self.target_signal.emit(1)
+            else:
+                # ID识别到了才画，更上面指令一样识别到了，只不过这里要做的是每过多少帧处理一次，上面是每帧都处理
+                try:
+                    # 这个地方要改一下id变了还在识别
                     if action_label_acc >= self.acc_thre:
                         fps_label = f'ID{int(self.target_id)} FPS: {int(avg_fps)} + {print_label} + {(print_acc*100):.2f}%'
-                    # 如果绿色标签没有显示，就是acc_thre给的太高
-                    cv2.putText(frame, fps_label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    # print(fps_label)
-                    # 显示界面
-                    self.update_detected_frame.emit(frame)
-            else:
-                for id, bbox in results.items():
-                    try:
-                        if id != self.target_id:
-                            continue
-                    except TypeError:
-                        break
-                    # 是否开启图像匹配
-                    # 数据处理
-                    # xyxy = self.tlwh_to_xyxy(result.tlwh)
-                    xyxy = bbox
-                    bbox_img = self.crop_image(frame, xyxy)
-                    padded_img = self.padding_bboximg(bbox_img)
-                    # 推理
-                    preds = self.action_model(padded_img, device=self.device, verbose=False)
-                    # 标签处理
-                    action_label = self.action_label_map[str(preds[0].probs.top1)]
-                    action_label_acc = preds[0].probs.top1conf.cpu().numpy()
-                    if action_label_acc <= self.acc_thre:
-                        continue
-                    action_preds = [action_label, action_label_acc]
-                    action_queue.enqueue(item=action_preds)
-                    # print(preds)
-                    # 将显示的识别数据和发送的数据分开，可在页面单独显示该画面
-                    if count == self.num_frame:
-                        print_label, print_acc = action_queue.find_most_frequent()
-                        count = 0
-                    else:
-                        count += 1
-                        
-                    # 控制摄像头
-                    if self.tracking and self.cam_ctrl_finshed:
-                        # 该版本将摄像头控制功能取消，改为偏移量计算，需要将识别结果与跟踪同步传递
-                        # print(time.time())
-                        self.ControlPTZ_V2_(print_label, xyxy)
-                    
-                # 计算帧率
-                # 记录当前时间
-                curr_time = time.time()
-                fps = 1 / (curr_time - prev_time)
-                prev_time = curr_time
-                # 添加到FPS列表并保持滑动窗口大小
-                fps_list.append(fps)
-                if len(fps_list) > self.fps_window_size:
-                    fps_list.pop(0)
-                # 计算平均FPS
-                avg_fps = sum(fps_list) / len(fps_list)
-
-                # 绘图
-                # 绘制框
-                # 因为上面都是浅拷贝，所以在tracker中的画图在此处有效
-                # 绘制帧率
-                if action_label_acc >= self.acc_thre:
-                    fps_label = f'ID{int(self.target_id)} FPS: {int(avg_fps)} + {print_label} + {(print_acc*100):.2f}%'
+                except TypeError:
+                    fps_label = ""
                 # 如果绿色标签没有显示，就是acc_thre给的太高
                 cv2.putText(frame, fps_label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                # print(fps_label)
-                # 显示界面
-                self.update_detected_frame.emit(frame)
+
+            # 无论图像是何种都需要将其发送出去，以保证页面的流畅性
+            self.update_detected_frame.emit(frame)
+            self.update_frame.emit(img)
             
     # 接受界面传来的信号
     @pyqtSlot(bool)

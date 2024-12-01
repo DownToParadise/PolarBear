@@ -13,12 +13,14 @@ from hik import HKCam
 class videoProcessingThread2(QThread):
     # 用于发送可视化页面
     update_frame = pyqtSignal(object)
+    
     def __init__(self):
         super().__init__()
         self.Cam = None
         self.cam_ip = None
         self.cam_name = None
         self.cam_pass = None
+        self.running = False
 
     def CamInit(self, ip, name, passwd):
         # 初始化摄像头
@@ -33,6 +35,10 @@ class videoProcessingThread2(QThread):
     def run(self):
         if self.Cam is None:
             print("传递参数的摄像头未初始化")
-        while True:
+        while True and self.running:
             _, frame = self.Cam.read()
             self.update_frame.emit(frame)
+
+    @pyqtSlot(bool)
+    def ChangeRunning(self, flag):
+        self.running = flag

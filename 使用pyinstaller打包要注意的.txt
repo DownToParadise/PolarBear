@@ -1,0 +1,9 @@
+12.1 使用文件夹形式进行打包 可正常运行
+
+没打包成功要自己复制粘贴的
+1.pvporcupine
+2.face_recognition_model
+
+3.tracker ui_files weights lib拎出来
+
+pyinstaller --noconfirm --onedir --console --icon "D:\code\PolarBear\bitbug_favicon.ico" --add-data "D:\code\PolarBear\camera.py;." --add-data "D:\code\PolarBear\camera_controlV1.py;." --add-data "D:\code\PolarBear\cameraV3.py;." --add-data "D:\code\PolarBear\HCNetSDK.dll;." --add-data "D:\code\PolarBear\HCNetSDK.py;." --add-data "D:\code\PolarBear\hik.py;." --add-data "D:\code\PolarBear\PlayCtrl.py;." --add-data "D:\code\PolarBear\speak_to_text.py;." --add-data "D:\code\PolarBear\voice_thread.py;." --add-data "D:\code\PolarBear\wake.py;." --add-data "D:\code\PolarBear\yolo_queue.py;." --add-data "D:\code\PolarBear\lib;lib/" --add-data "D:\code\PolarBear\ui_files;ui_files/" --add-data "D:\code\PolarBear\weights;weights/" --add-data "D:\code\PolarBear\YOLOtracker;YOLOtracker/"  "D:\code\PolarBear\main_platformV2.py"
