@@ -6,32 +6,16 @@ import sys, os
 from PyQt5 import uic
 import torch
 from cameraV3 import videoProcessingThread
-from voice_thread import voice_thread
+from voice_thread1 import voice_thread
 import time
 from ctypes import create_string_buffer
 from camera_controlV1 import Camera
 import threading
 from camera import videoProcessingThread2
-import cv2
-import numpy as np
-from FontSet import FontSettingsDialog
-
-# 登录界面
-class Login(QWidget):
-    switch_window = pyqtSignal()
-    def __init__(self):
-        super().__init__()
-        self.ui = uic.loadUi("configs/ui_files/login.ui")
-        #登录界面ui控件
-        self.ip_line = self.ui.ip_line
-        self.admin_line = self.ui.admin_line
-        self.pw_line = self.ui.pw_line
-        self.login_button = self.ui.login_button
-        #连接槽
-        self.login_button.clicked.connect(self.switchwindow)
-
-    def switchwindow(self):
-        self.switch_window.emit()
+from FontSet import FontSettingsDialog, FontSetting
+from PLC import plc_thread
+from viusalPage import ViusalPage
+import json
 
 class PlatForm(QMainWindow):
     # 线程生命区
@@ -47,21 +31,26 @@ class PlatForm(QMainWindow):
     imageFile = pyqtSignal(object)
     # 单独图片发送信号
     camera_signal = pyqtSignal(bool)
+    # 用于PLC通信
+    plcThread = plc_thread()
 
     def __init__(self):
         super(PlatForm, self).__init__()
         # 这么写的原因时因为海康的API中更改了工作目录
         # print(os.getcwd())
         self.ui = uic.loadUi("configs/ui_files/platform.ui")
-        self.visiualUI = uic.loadUi("configs/ui_files/page.ui")
+        # self.visiualUI = uic.loadUi("configs/ui_files/page.ui")
+        self.visiualUI = ViusalPage()
 
         # 获取ui设置
         self.detectedVideo = self.ui.video
         self.detectButton = self.ui.detectButton
         self.textBrowser = self.ui.textBrowser
         self.lineEdit = self.ui.lineEdit
-        self.fontSettingButton = self.ui.fontSettingButton
-        self.setttingButton()
+        self.outputFontSettingButton = self.ui.fontSettingButton
+        self.subtitleFontSettingButton = self.ui.fontSettingButton_2
+        # self.saveSettingButton = self.ui.saveSettingButton
+        # self.setttingButton()
         # self.trackButton = self.ui.trackButton
         self.visiualButton = self.ui.visiualButton
         self.randomMatchButton = self.ui.trackButton_2
@@ -76,7 +65,7 @@ class PlatForm(QMainWindow):
         self.CamLeftButton = self.ui.CamLeft
         self.CamRightButton = self.ui.CamRight
         # 外置可视化页面
-        self.detectedVideo2 = self.visiualUI.video
+        # self.detectedVideo2 = self.visiualUI.video
         self.ImagLabel = self.ui.ImagLabel
         
         # 发送信号
@@ -91,7 +80,9 @@ class PlatForm(QMainWindow):
         self.camera_signal.connect(self.videoThread2.ChangeRunning)
 
         # 输出栏字体设置
-        self.fontSettingButton.clicked.connect(self.open_font_setting_dialog)
+        self.outputFontSettingButton.clicked.connect(self.output_font_setting)
+        self.subtitleFontSettingButton.clicked.connect(self.subtitle_font_setting)
+        # self.saveSettingButton.clicked.connect(self.saveSetting)
 
         # 接受来自camera信号
         # 传画面
@@ -118,6 +109,8 @@ class PlatForm(QMainWindow):
         self.voice_disable_button.clicked.connect(self.voice_disable)
         self.voiceThread.update_signal.connect(self.update_text_browser)
         self.voiceThread.voiceText_BeiBei.connect(self.voice_beibei)
+        self.voiceThread.plc_voice_signal.connect(self.update_voice_plc_signal)
+        
         self.voiceThread.voiceText_User.connect(self.voice_user)
         # 摄像头云台控制
         self.CamUPButton.clicked.connect(self.cam_ctrl_up)
@@ -127,10 +120,20 @@ class PlatForm(QMainWindow):
         self.speed = 5
         self.sleeptime = 1
 
-        # 界面控制
-        self.initUI()
-        # 控制文本输出
-        self.initTextBrowser()
+        # 北北字幕，字幕显示帧数是BeiBei_text_count_thread(模拟没秒的帧数) * 说话时间，达标归为None
+        # 文字直接发给self.viusalUI.text
+        self.BeiBei_text = None
+        # 每秒有多少帧
+        self.BeiBei_text_count_thread = 18
+        # 总计时器 
+        self.BeiBei_text_count = 0
+        # 录音有多长
+        self.BeiBei_text_time = 0
+        # 改录音有几段
+        self.BeiBei_text_length = 0
+        # 每段文字显示时间BeiBei_text_time // length
+        self.BeiBei_text_lengthtime = 0
+        # 设置中文字体
 
         # ids
         self.ids = None
@@ -138,6 +141,8 @@ class PlatForm(QMainWindow):
         self.CamCtrl = None
         self.detectFalseCount = 0   # 未检测到的次数
         self.detectFalseCount_thre = 30
+        self.painter = None
+        self.pixmap = None
 
         # 图像为匹配次数
         self.image_match_tolerance = 0
@@ -149,16 +154,127 @@ class PlatForm(QMainWindow):
         self.person_confirm = 0
         self.person_confirm_thre = 10
 
-    def open_font_setting_dialog(self):
-        # pass
-        font = self.textBrowser.font()
-        dialog = FontSettingsDialog(self, font)
+        self.initUI()
+        # 控制文本输出
+        self.initTextBrowser()
+        # 初始化字体
+        # 字体，具体数据格式产参见font.json文件
+        self.font_infor = None
+        self.initFont()
+
+    def saveSetting(self):
+        # 保存字体配置
+        if self.font_info is not None:
+            with open('configs\\font.json', 'w') as file:
+                json.dump(self.font_info, file, indent=2)
+        # 后续可以增加其他配置
+
+    def closeEvent(self, event):
+        # 由于mainwindow不是独立存在，所以closeEvent不会响应
+        print("this is closeEvent")
+        self.saveFont()
+        showMessage = QMessageBox.question()
+        reply = showMessage(self, '警告',"系统将退出，是否确认?", QMessageBox.Yes |QMessageBox.No, QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
+            event.accept()
+        else:
+            event.ignore()
+    
+    def saveFont(self):
+        """保存配置文件"""
+        if self.font_info is not None:
+            with open('configs\\font.json', 'w') as file:
+                json.dump(self.font_info, file, indent=2)
+
+    def initFont(self):
+        print("font", os.getcwd())
+        with open("configs\\font.json", "r") as file:
+            self.font_info = json.load(file)
+            # 配置输出端函数
+            font = QFont(self.font_info["outputFont"]["font"])
+            font.setPointSize(self.font_info["outputFont"]["size"])
+            font.setItalic(self.font_info["outputFont"]["italic"])
+            font.setBold(self.font_info["outputFont"]["bold"])
+            self.textBrowser.setFont(font)
+            color = QColor(self.font_info["outputFont"]["color"]["R"], self.font_info["outputFont"]["color"]["G"], self.font_info["outputFont"]["color"]["B"])
+            # self.textBrowser.setStyleSheet(f"color: rgb({self.font_info["outputFont"]["R"]}, {self.font_info["outputFont"]["G"]}, {self.font_info["outputFont"]["b"]});")
+            self.textBrowser.setTextColor(color)
+
+            # 配置字幕字体设置
+            font = QFont(self.font_info["subtitleFont"]["font"])
+            font.setPointSize(self.font_info["subtitleFont"]["size"])
+            font.setItalic(self.font_info["subtitleFont"]["italic"])
+            font.setBold(self.font_info["subtitleFont"]["bold"])
+            color = QColor(self.font_info["subtitleFont"]["color"]["R"], self.font_info["subtitleFont"]["color"]["G"], self.font_info["subtitleFont"]["color"]["B"])
+            self.visiualUI.setFont(font, color)
+            
+    def updateDetected(self, data):
+        # 此处留给plc传递信号逻辑
+        self.plcThread.visual_plc_data = data
+        # self.showMessage(str(self.plcThread.visual_plc_data))
+
+    def voice_beibei(self, mes):
+        # 说话的时长要与字幕匹配
+        self.visiualUI.text = mes
+
+    def update_voice_plc_signal(self, data):
+        # 发送三个数据下标、录音时间、字幕
+        self.plcThread.voice_plc_data = data[:2]
+        # 获取录音时长
+        self.BeiBei_text_time = data[1]
+        # 获取分段字幕
+        self.visiualUI.BeiBei_text = data[2].split()
+        self.visiualUI.text = self.visiualUI.BeiBei_text[0]
+        # 获取录音分段
+        self.BeiBei_text_length = len(self.visiualUI.BeiBei_text)
+        # 生成每段话的播放时间
+        self.BeiBei_text_lengthtime = self.BeiBei_text_time // self.BeiBei_text_length
+        print(f"voice{self.BeiBei_text_time} = {self.BeiBei_text_lengthtime} * {self.BeiBei_text_length}")
+
+        mes = "北北:" + data[2]
+        self.showMessage(mes)
+        self.showMessage(str(self.plcThread.voice_plc_data))
+
+        # self.visiualUI.text = self.visiualUI.BeiBei_text[0]
+
+    def subtitle_font_setting(self):
+        # 字幕字体设置
+        dialog = FontSettingsDialog(self, self.visiualUI.chinese_font, self.visiualUI.color)
         if dialog.exec_() == QDialog.Accepted:
-            selected_font = dialog.get_selected_font()
+            selected_font, color = dialog.get_selected_font()
+            self.visiualUI.setFont(selected_font, color)
+            self.font_info["subtitleFont"]["font"] = selected_font.family()
+            self.font_info["subtitleFont"]["size"] = selected_font.pointSize()
+            self.font_info["subtitleFont"]["italic"] = selected_font.italic()
+            self.font_info["subtitleFont"]["bold"] = selected_font.bold()
+            self.font_info["subtitleFont"]["color"]["R"] = color.red()
+            self.font_info["subtitleFont"]["color"]["G"] = color.green()
+            self.font_info["subtitleFont"]["color"]["B"] = color.blue()
+            self.saveFont()
+
+    def output_font_setting(self):
+        # 输出台字体设置
+        output_font = self.textBrowser.font()
+        output_color = self.textBrowser.textColor()
+        dialog = FontSettingsDialog(self, output_font, output_color)
+        if dialog.exec_() == QDialog.Accepted:
+            selected_font, color = dialog.get_selected_font()
             self.textBrowser.setFont(selected_font)
+            self.textBrowser.setStyleSheet(f"color: rgb({color.red()}, {color.green()}, {color.blue()});")
+
+            # 更新字体配置
+            self.font_info["outputFont"]["font"] = selected_font.family()
+            self.font_info["outputFont"]["size"] = selected_font.pointSize()
+            self.font_info["outputFont"]["italic"] = selected_font.italic()
+            self.font_info["outputFont"]["bold"] = selected_font.bold()
+            self.font_info["outputFont"]["color"]["R"] = color.red()
+            self.font_info["outputFont"]["color"]["G"] = color.green()
+            self.font_info["outputFont"]["color"]["B"] = color.blue()
+            self.saveFont()
 
     def setttingButton(self):
-        print("settingButton", os.getcwd())
+        # print("settingButton", os.getcwd())
         pixmap = QPixmap("configs\pics\\fontsetting.png")
         self.fontSettingButton.setIcon(QIcon(pixmap))
 
@@ -222,7 +338,6 @@ class PlatForm(QMainWindow):
                 self.person_confirm = 0
                 self.person_lost_tolerance = 0
                     
-
     def pic_find(self):
         """找pics文件夹中是否存有图片，如果没有图片则返回None，如果有多个图片则随意取一个图片"""
         pwd = os.getcwd()
@@ -314,24 +429,33 @@ class PlatForm(QMainWindow):
             self.randomMatchButton.setText("打开随机匹配模式")
     
     def randomID_(self):
-        # 随机更改id
-        # ids为空的情况已经考虑
-        # 考虑目标丢失的鲁棒性
-        # 考虑目标丢失的情况
-        if self.randomFlag:
+        """随机更改id"""
+        # 考虑触发随机ids为空的情况
+        # 考虑目标丢失已经另外处理
+        if len(self.ids) != 0:
             random_index = torch.randint(0, len(self.ids), (1,)).item()
             self.id = self.ids[random_index]
             self.targetID.emit(self.id)
             self.printMessage("已经匹配目标ID" + str(int(self.id)))
             return self.id
         else:
-            pass
-        
-    def updateDetected(self, data):
-        # 此处留给plc传递信号逻辑
-        data = str(data)
-        # self.showMessage(data)
-
+            # 这个地方会不会无限的递归
+            self.randomMatchButton.click()
+            # print("randomID_, 递归")
+            # self.randomID_()
+    
+    def setQpan(self, pixmap):
+        """设置字体颜色及其大小"""
+        # font  = QFont('Arial', 20, QFont.Bold)
+        chinese_font = QFont("SimHei", 24)
+        painter = QPainter(self.visiualUI)
+        painter.drawPixmap(0, 0, self.pixmap)
+        pen = QPen(Qt.red, 5)
+        painter.setFont(chinese_font)
+        painter.setPen(pen)
+        text_rect = painter.boundingRect(QRect(0, 0, self.pixmap.width(), self.pixmap.height()), Qt.AlignBottom | Qt.AlignCenter, self.BeiBei_text)
+        painter.drawText(self.pixmap.width() // 2 - text_rect.width() // 2, self.pixmap.height() - text_rect.height() - 10, self.BeiBei_text)
+ 
     def updateDetectedFrame_slot2(self, frame):
         # 将画面传递给外置可视化页面
         # 还是使用一个画面
@@ -340,14 +464,29 @@ class PlatForm(QMainWindow):
             if text != "打开可视化页面":
                 self.visiualButton.setText("打开可视化页面")
         else:
-            # 只需要要将label resize windown一样大，图片使用setPixmap会自适应使用
-            width = self.visiualUI.width()
-            height = self.visiualUI.height()
-            self.detectedVideo2.resize(width, height)
-            qimg = QImage(frame.data, frame.shape[1], frame.shape[0], QImage.Format_BGR888)
-            pixmap = QPixmap.fromImage(qimg)
-            self.detectedVideo2.setScaledContents(True)
-            self.detectedVideo2.setPixmap(pixmap)
+            self.visiualUI.frame = frame
+            # 字幕优化
+            # 可以考虑pyqt中的自动换行机制
+            if self.videoThread.running and self.visiualUI.text != None:
+                # print(self.BeiBei_text_count)
+                self.BeiBei_text_count += 1
+                # # 改用qt绘图
+                if self.BeiBei_text_count % self.BeiBei_text_count_thread == 0:
+                    # 多少秒
+                    a = self.BeiBei_text_count // self.BeiBei_text_count_thread
+                    print(1, self.BeiBei_text_count // self.BeiBei_text_count_thread, self.BeiBei_text_time)
+                    if a % self.BeiBei_text_lengthtime == 0:
+                        # 切换下一句字幕
+                        i = a // self.BeiBei_text_lengthtime 
+                        print(i, a, self.BeiBei_text_lengthtime, sep="\t")
+                        try:
+                            self.visiualUI.text = self.visiualUI.BeiBei_text[i]
+                        except IndexError:
+                            self.showMessage("字幕展示完毕")
+                            self.visiualUI.BeiBei_text = None
+                            self.visiualUI.text = None
+                            self.BeiBei_text_count = 0
+            self.visiualUI.update()   
             
     def visiualPageOpen(self):
         text = self.visiualButton.text()
@@ -361,13 +500,9 @@ class PlatForm(QMainWindow):
             self.visiualUI.close()
             self.showMessage("可视化页面已关闭")
             self.visiualButton.setText("打开可视化页面")
-
-    def voice_beibei(self, mes):
-        mes = "北北:" + mes
-        self.showMessage(mes)
         
     def voice_user(self, mes):
-        mes = "你:  " + mes
+        mes = "你: " + mes
         self.showMessage(mes)
 
     def CamInit(self, ip, name, password):
@@ -408,12 +543,12 @@ class PlatForm(QMainWindow):
 
     def voice_disable(self):
         self.voiceThread.stop()
+        print("voice stop", self.voiceThread.running)
         self.printMessage("语音已停止")
 
     def searchID(self, id):
+        """返回True or false"""
         temp = torch.isin(id, self.ids)
-        # if not temp:
-        #     self.showMessage("目标丢失")
         return temp
 
     def updateID(self):
@@ -433,7 +568,7 @@ class PlatForm(QMainWindow):
     def showMessage(self, message):
         """
         如果要输出富文本，或添加输出逻辑，在该函数添加
-        先接受数据，再处理数据，最后将数据打印
+        先接受数据，再处理数据，最后将数据打印                            
         这里是接受和处理数据槽函数
         """
         self.printMessage(message=message)
@@ -494,15 +629,7 @@ class PlatForm(QMainWindow):
 
     def updateDetectedIDs_slot(self, new_ids):
         # print("this is updateDetectedIDS\t", new_ids)
-        # 不在末尾放发送函数的原因是减少发送次数
-        # 看一下，如果变化过于频繁就直接选择赋值
-        # if len(new_ids) == 0:
-        #     self.detectFalseCount += 1
-        #     if self.detectFalseCount % 20 == 0:
-        #         self.showMessage("当前未检测到人体...."+str(self.detectFalseCount // 20))
-        #         if self.detectFalseCount == 200:
-        #             self.detectFalseCount = 0
-        #     return
+
         if self.ids is None:
             self.ids = new_ids
         else:
@@ -521,15 +648,45 @@ class PlatForm(QMainWindow):
                         # print("from \t", self.ids)
                         self.ids = new_ids
 
-class Integrate(QWidget):
+# 登录界面
+class Login(QWidget):
+    switch_window = pyqtSignal()
+    def __init__(self):
+        super().__init__()
+        self.ui = uic.loadUi("configs/ui_files/login.ui")
+        #登录界面ui控件
+        self.ip_line = self.ui.ip_line
+        self.admin_line = self.ui.admin_line
+        self.pw_line = self.ui.pw_line
+        self.login_button = self.ui.login_button
+        #连接槽
+        self.login_button.clicked.connect(self.switchwindow)
+
+    def switchwindow(self):
+        self.switch_window.emit()
+
+    def closeEvent(self, event):
+        print("this is closeEvent")
+        reply = QMessageBox.question(self, '警告',"系统将退出，是否确认?", QMessageBox.Yes |QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            event.accept()
+        else:
+            event.ignore()
+
+# 需要把Integrate方法解离，将mainwindow作为主函数触发，这样可以通过触发mainwindow的closeEvnet来保存当下配置
+class Integrate(QMainWindow):
     def __init__(self):
         super().__init__()
         self.name = ""
         self.ip = ""
         self.password = ""
         self.init_info = 0
-        self.window = PlatForm()
-        
+        self.Window = PlatForm()
+    
+    def closeEvent(self, event):
+        print("this is integrate closeEvent")
+        self.Window.saveFont()
+
     def show_login(self):
         self.login = Login()
         # 第一个执行的函数
@@ -542,7 +699,7 @@ class Integrate(QWidget):
         ##传参
         if check_value == 1:
             self.login.ui.close()
-            self.window.ui.show()
+            self.Window.ui.show()
         else :
             print("self", self.init_info)
             if self.init_info == 1:
@@ -594,12 +751,17 @@ class Integrate(QWidget):
             del test
             return 0
         else :  
-            self.window.CamInit(self.ip, self.name, self.password)
-            self.window.videoThread.CamInit(self.ip, self.name, self.password)
-            self.window.videoThread2.CamInit(self.ip, self.name, self.password)
+            self.Window.CamInit(self.ip, self.name, self.password)
+            self.Window.videoThread.CamInit(self.ip, self.name, self.password)
+            self.Window.videoThread2.CamInit(self.ip, self.name, self.password)
             del test
             return 1
-        
+    # 回车登录
+    # def keyPressEvent(self, a0):
+    #     print(a0.key())
+    #     if a0.key() == Qt.Key_Return:
+    #         self.show_main()
+        # return super().keyPressEvent(a0)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv) 
